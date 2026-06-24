@@ -19,8 +19,8 @@ Common prerequisites:
 - macOS
 - `git`
 - `docker`
-- a login keychain that can be unlocked
 - access to the OpenClaw Docker setup flow in the main repo
+- a login keychain that can be unlocked (required for `reinstall-openclaw.sh`)
 
 Usage examples:
 
