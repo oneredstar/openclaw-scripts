@@ -16,6 +16,8 @@ This repository contains a small set of macOS shell utilities for maintaining an
 - Use `upgrade-openclaw.sh` when the existing installation should be updated and restarted.
 - The script backs up the data directory and the active repo (with verification), stops the current Docker compose stack without removing volumes, fetches the latest changes, runs the Docker setup, and brings the stack back up.
 - If the repo is detached, the script resets to the latest stable tag.
+- **The standalone OpenClaw node is also upgraded.** The script stops the running `openclaw node` process (matched by `pgrep -f "openclaw node"`), runs `npm install -g openclaw@latest`, and restarts the node in the background with environment from `~/.openclaw-mac-node/node.env` and the same argv Nizam uses in his launch script (`--host 127.0.0.1 --port 18789 --display-name "MacNode"`). The node log is written to `~/.openclaw-mac-node/node.log`. If `node.env` is missing, the node upgrade is skipped with a clear log message and the gateway upgrade proceeds.
+- `npm install -g` may need `sudo` if the npm global prefix is under `/usr/...`; the script logs a heads-up when it detects that path.
 - The script asks for typed confirmation before destructive steps; pass `--yes` to skip.
 
 ### 3. Data reset

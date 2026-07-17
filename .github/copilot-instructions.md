@@ -13,6 +13,7 @@ When editing this repo:
 - Do not use `-f` on `docker rmi` or `docker volume rm`. Unexpected "image in use" or "volume in use" errors must surface.
 - The Docker resource filter (images, networks, volumes) must be narrow: only `openclaw`, `openclaw-...`, `openclaw/...`, or `.../openclaw[-/:]...`. Third-party resources that merely contain the substring "openclaw" must be left alone.
 - `backup-data.sh` is non-destructive. It must never remove or modify the source data directory.
+- `upgrade-openclaw.sh` upgrades both the Docker-side gateway and the standalone OpenClaw node. The node side: stop running `openclaw node` processes by `pgrep -f`, then `npm install -g openclaw@latest`, then restart the node in the background using `~/.openclaw-mac-node/node.env` and the argv from Nizam's launch script (`--host 127.0.0.1 --port 18789 --display-name "MacNode"`). The env file must be sourced inside a subshell so `OPENCLAW_GATEWAY_TOKEN` and similar secrets are never echoed or written to the upgrade log. The node log goes to `~/.openclaw-mac-node/node.log`. Node-upgrade steps must be soft-fail (log + return 0) so a missing `node.env` or missing `npm` does not abort an otherwise-successful gateway upgrade.
 - When changing a workflow, update the README and `docs/operations.md` in the same PR.
 - Prefer small, explicit changes over broad refactors so the maintenance flow stays easy to audit.
 
