@@ -2,45 +2,56 @@
 
 This repository contains a small set of macOS shell utilities for maintaining an OpenClaw installation.
 
-Common flows:
+## Common flows
 
-1. First-time or full reinstall
+### 1. First-time or full reinstall
 
 - Use `reinstall-openclaw.sh` when the local installation needs to be replaced entirely.
-- The script backs up the existing data directory, cleans up leftover Docker containers, images, networks, and volumes, clones the latest stable OpenClaw release, then runs the Docker setup.
+- The script backs up both the data directory and the local repo (with verification), then cleans up the OpenClaw Docker containers, images, networks, and volumes, removes the local clone and `~/.openclaw`, and clones the latest stable release before running the Docker setup.
 - It requires an interactive login keychain unlock.
+- By default the script prints what it is about to do and asks for typed confirmation before any destructive step. Pass `--yes` to skip the prompt for automation.
 
-2. Normal upgrade
+### 2. Normal upgrade
 
 - Use `upgrade-openclaw.sh` when the existing installation should be updated and restarted.
-- The script backs up both the data directory and the active repo, fetches the latest changes, runs the Docker setup, and brings the stack back up.
+- The script backs up the data directory and the active repo (with verification), stops the current Docker compose stack without removing volumes, fetches the latest changes, runs the Docker setup, and brings the stack back up.
 - If the repo is detached, the script resets to the latest stable tag.
+- The script asks for typed confirmation before destructive steps; pass `--yes` to skip.
 
-3. Data reset
+### 3. Data reset
 
 - Use `reset-data.sh` when you only need a fresh `config`, `workspace`, and `auth-secrets` structure at `~/openclaw-data`.
-- The script backs up any existing data before removing it and recreates the directories.
+- The script backs up the existing data (and verifies it) before removing the source and recreating the standard subdirectories.
+- The script asks for typed confirmation before destructive steps; pass `--yes` to skip.
 
-4. Data backup
+### 4. Data backup
 
 - Use `backup-data.sh` when you only need the backup without touching the original directory.
-- The backup is stored under `~/openclaw-backups` with a timestamped name.
+- **This script is non-destructive.** It copies the data directory to a timestamped folder under `~/openclaw-backups` and verifies the copy; the source is left untouched.
+- Safe to run as often as you want. Each run writes a new timestamped backup; existing backup paths are never overwritten.
 
-5. Rollback
+### 5. Rollback
 
 - Use `rollback-openclaw.sh` to restore a previous repo and optional data backup.
-- Pass a backup ID explicitly or leave it empty to pick the latest repo backup.
-- The script stops the current Docker compose stack, restores the backup, and starts the restored stack.
+- Pass a backup ID (the timestamp suffix of `openclaw-repo-<id>`) explicitly or leave it empty to pick the latest repo backup.
+- Before restoring, the script always writes a `pre-rollback-repo-<timestamp>` and (if data exists) `pre-rollback-data-<timestamp>` snapshot of the current state. The rollback is itself reversible.
+- The restore is atomic-style: the current directory is moved aside before the backup is copied in. If the copy fails, the original is moved back into place.
+- The script asks for typed confirmation before destructive steps; pass `--yes` to skip.
 
-Backup file naming:
+## Backup file naming
 
-- `openclaw-data-*` for data backups
-- `openclaw-repo-*` for repo backups
-- `pre-rollback-*` for the temporary copies created during rollback
+- `openclaw-data-*` — data backups written by `backup-data.sh`, `reset-data.sh`, `upgrade-openclaw.sh`, and `reinstall-openclaw.sh`.
+- `openclaw-repo-*` — repo backups written by `upgrade-openclaw.sh` and `reinstall-openclaw.sh`.
+- `pre-rollback-*` — temporary snapshots of the current state taken at the start of a rollback. The rollback flow itself is reversible by running `rollback-openclaw.sh` again with the `pre-rollback-*` timestamp.
 
-Defensive patterns to preserve:
+## Defensive patterns to preserve
 
-- Back up before destruction.
-- Do not remove the user's current data until the backup has been verified.
-- Clean up Docker artifacts only when the OpenClaw repo is the active target.
-- Update the README and Copilot instructions when behavior changes.
+- **Back up before destruction.** Every script that removes a directory copies it to `~/openclaw-backups` first.
+- **Verify the backup before destroying the source.** Each backup is checked against the source (top-level entry count match) before any `rm -rf` runs.
+- **Never overwrite a backup path.** If the target path already exists, the script fails rather than clobbering an earlier copy.
+- **Destructive steps are gated on a typed confirmation** that names the exact backup path being written and what will be removed. `--yes`/`-y` skips the prompt for automation.
+- **Destructive steps without `--yes` require a TTY.** Non-interactive invocations must opt in explicitly with `--yes`.
+- **Do not pass `--volumes` to `docker compose down`.** Named volumes defined in the compose file are removed only by the explicit volume cleanup in `reinstall-openclaw.sh`, which uses a narrow name filter.
+- **Do not use `-f` on `docker rmi` or `docker volume rm`.** Unexpected "image in use" or "volume in use" errors should surface so the operator can investigate.
+- **Narrow the Docker resource filter** to images/networks/volumes whose name is exactly `openclaw` or starts with `openclaw-`, `openclaw/`, or `openclaw:` (or namespaced equivalents like `.../openclaw-...`). Third-party images that merely contain the substring "openclaw" elsewhere are left alone.
+- **Update the README and these docs** when behavior changes.
