@@ -35,7 +35,7 @@ ensure_dir() {
     fi
 }
 
-backup_and_delete_data() {
+backup_data() {
     if [ ! -d "$OPENCLAW_DATA_DIR" ]; then
         log "No OpenClaw data found at $OPENCLAW_DATA_DIR; nothing to backup"
         return
@@ -51,13 +51,12 @@ backup_and_delete_data() {
         fail "Backup verification failed; expected $backup_path to exist"
     fi
 
-    log "Backup complete; removing original data directory $OPENCLAW_DATA_DIR"
-    rm -rf "$OPENCLAW_DATA_DIR"
+    log "Backup complete; original data directory $OPENCLAW_DATA_DIR left intact"
 }
 
 main() {
     require_command cp
-    backup_and_delete_data
+    backup_data
 }
 
 main "$@"
