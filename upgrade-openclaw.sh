@@ -49,9 +49,12 @@ usage() {
 Usage: $(basename "$0") [--yes]
 
 Upgrades the existing OpenClaw install by:
-  1. Backing up data, the active repo, and the currently installed
-     openclaw npm package version (each gets a timestamped name under
-     \$OPENCLAW_BACKUP_ROOT and is verified before anything is touched).
+  1. Backing up data and the active repo (each gets a timestamped
+     name under \$OPENCLAW_BACKUP_ROOT and is verified before anything
+     is touched), and recording the currently installed openclaw npm
+     package version as a sidecar file under \$OPENCLAW_BACKUP_ROOT
+     so rollback can downgrade it later (not "verified": it is just
+     the version string captured from npm before the upgrade).
   2. Stopping the current Docker compose stack (volumes preserved).
   3. Stopping the running OpenClaw node (if any).
   4. Pulling the latest changes (or, if detached, the latest stable tag).
@@ -252,8 +255,15 @@ upgrade_openclaw_node() {
             ;;
     esac
     log "Upgrading openclaw via 'npm install -g openclaw@latest'"
-    # Inherit the existing PATH so npm can find its global bin dir.
-    npm install -g openclaw@latest
+    # Soft-fail: if the install fails (EACCES, network, registry hiccup,
+    # proxy issue, etc.) we still want the gateway upgrade to succeed.
+    # The OpenClaw node will then start with the previously installed
+    # npm-global version.
+    if ! npm install -g openclaw@latest; then
+        log "WARNING: 'npm install -g openclaw@latest' failed; the OpenClaw node will start with the previously installed version."
+        log "Try manually:  npm install -g openclaw@latest"
+        return 0
+    fi
     # Re-hash so a subsequent `command -v openclaw` sees the new binary.
     hash -r 2>/dev/null || true
 }

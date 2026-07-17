@@ -60,7 +60,7 @@ The matching data backup (openclaw-data-<backup_id>) is restored if it
 exists; if no matching data backup is found, the current data directory
 is left in place.
 
-If the matching node version file (openclaw-node-<backup_id.version) is
+If the matching node version file (openclaw-node-<backup_id>.version) is
 present, the global openclaw npm package is also downgraded to that
 version (unless --skip-node is given), and the OpenClaw node is
 restarted in the background using ~/.openclaw-mac-node/node.env.
@@ -254,7 +254,13 @@ rollback_openclaw_node() {
     fi
 
     if ! command -v npm >/dev/null 2>&1; then
-        fail "npm not found in PATH; cannot downgrade the openclaw npm package. Restore $version_file manually."
+        # Soft-fail: node rollback is optional. The gateway rollback has
+        # already succeeded at this point; failing it because npm is
+        # missing would be too strict. Leave a clear hint to either
+        # downgrade manually or re-run with --skip-node to skip this.
+        log "WARNING: npm not found in PATH; cannot downgrade the openclaw npm package automatically."
+        log "Re-run with --skip-node to skip the node side, or downgrade manually:  npm install -g openclaw@$previous_version"
+        return 0
     fi
 
     local previous_version
@@ -273,8 +279,11 @@ rollback_openclaw_node() {
     esac
 
     log "Rolling back openclaw npm package to $previous_version (from $version_file)"
+    # Soft-fail the downgrade for the same reasons as upgrade_openclaw_node:
+    # EACCES, network, registry hiccup, etc. must not undo a successful
+    # gateway rollback.
     if ! npm install -g "openclaw@$previous_version"; then
-        log "WARNING: 'npm install -g openclaw@$previous_version' failed; the openclaw node may not start cleanly."
+        log "WARNING: 'npm install -g openclaw@$previous_version' failed; the OpenClaw node may start with the previous package version."
         log "Try manually:  npm install -g openclaw@$previous_version"
         return 0
     fi

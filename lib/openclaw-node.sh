@@ -30,14 +30,21 @@ stop_openclaw_node() {
     # shellcheck disable=SC2086
     kill $pids 2>/dev/null || true
     sleep 1
-    if pgrep -f "openclaw node" >/dev/null 2>&1; then
-        log "openclaw node did not exit after SIGTERM; sending SIGKILL"
+    # Re-grep for any survivors (the PID set may have changed since the
+    # first check: a respawn, a child we missed, etc.). Use the FRESH
+    # PID list for the SIGKILL escalation rather than the stale one,
+    # so we don't leave a still-running node that could collide on
+    # port when we try to start the upgraded one.
+    local survivors
+    survivors="$(pgrep -f "openclaw node" || true)"
+    if [ -n "$survivors" ]; then
+        log "openclaw node did not exit after SIGTERM; sending SIGKILL (PIDs: $survivors)"
         # shellcheck disable=SC2086
-        kill -9 $pids 2>/dev/null || true
+        kill -9 $survivors 2>/dev/null || true
         sleep 1
     fi
     if pgrep -f "openclaw node" >/dev/null 2>&1; then
-        log "WARNING: openclaw node is still running; continuing anyway"
+        log "WARNING: openclaw node is still running after SIGKILL; continuing anyway"
     fi
 }
 
@@ -66,7 +73,16 @@ start_openclaw_node() {
 
     ensure_dir "$(dirname "$OPENCLAW_NODE_LOG")"
     log "Starting openclaw node in the background (display-name=$OPENCLAW_NODE_DISPLAY_NAME, log=$OPENCLAW_NODE_LOG)"
+    # Disable errexit/pipefail/errexit-trace inside the subshell so that
+    # any failure while sourcing node.env, or a `disown` returning
+    # non-zero in a non-interactive shell (no job control), does not
+    # abort the parent upgrade/rollback. Node steps are soft-fail by
+    # contract; the post-launch pgrep below reports whether it actually
+    # came up.
     (
+        set +e
+        set +o pipefail
+        set +E
         set -a
         # shellcheck disable=SC1090
         . "$OPENCLAW_NODE_ENV_FILE"
@@ -76,8 +92,11 @@ start_openclaw_node() {
             --port "$OPENCLAW_NODE_PORT" \
             --display-name "$OPENCLAW_NODE_DISPLAY_NAME" \
             >> "$OPENCLAW_NODE_LOG" 2>&1 &
-        disown
-    )
+        # Best-effort: disown may fail when job control is disabled
+        # (non-interactive shells); the background `&` is enough to
+        # detach either way.
+        disown 2>/dev/null || true
+    ) || true
     sleep 1
     if pgrep -f "openclaw node" >/dev/null 2>&1; then
         log "OpenClaw node is running; tail $OPENCLAW_NODE_LOG to confirm startup."
