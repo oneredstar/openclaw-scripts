@@ -14,8 +14,11 @@ This repository contains a small set of macOS shell utilities for maintaining an
 ### 2. Normal upgrade
 
 - Use `upgrade-openclaw.sh` when the existing installation should be updated and restarted.
-- The script backs up the data directory and the active repo (with verification), stops the current Docker compose stack without removing volumes, fetches the latest changes, runs the Docker setup, and brings the stack back up.
+- The script backs up the data directory, the active repo, **and the currently installed openclaw npm package version** (saved to `openclaw-node-<TIMESTAMP>.version` under `~/openclaw-backups`, so rollback can downgrade it). Each backup is verified before the source is touched.
+- The script then stops the current Docker compose stack without removing volumes, fetches the latest changes, runs the Docker setup, and brings the stack back up.
 - If the repo is detached, the script resets to the latest stable tag.
+- **The standalone OpenClaw node is also upgraded.** The script stops the running `openclaw node` process (matched by `pgrep -f "openclaw node"`), runs `npm install -g openclaw@latest`, and restarts the node in the background with environment from `~/.openclaw-mac-node/node.env` and the same argv Nizam uses in his launch script (`--host 127.0.0.1 --port 18789 --display-name "MacNode"`). The node log is written to `~/.openclaw-mac-node/node.log`. If `node.env` is missing, the node upgrade is skipped with a clear log message and the gateway upgrade proceeds.
+- `npm install -g` may need `sudo` if the npm global prefix is under `/usr/...`; the script logs a heads-up when it detects that path.
 - The script asks for typed confirmation before destructive steps; pass `--yes` to skip.
 
 ### 3. Data reset
@@ -36,6 +39,8 @@ This repository contains a small set of macOS shell utilities for maintaining an
 - Pass a backup ID (the timestamp suffix of `openclaw-repo-<id>`) explicitly or leave it empty to pick the latest repo backup.
 - Before restoring, the script always writes a `pre-rollback-repo-<timestamp>` and (if data exists) `pre-rollback-data-<timestamp>` snapshot of the current state. The rollback is itself reversible.
 - The restore is atomic-style: the current directory is moved aside before the backup is copied in. If the copy fails, the original is moved back into place.
+- **The OpenClaw node is also rolled back.** If `openclaw-node-<backup_id>.version` exists in `~/openclaw-backups`, the script stops the running node, runs `npm install -g openclaw@<previous_version>` to downgrade the npm-global package, and restarts the node in the background using `~/.openclaw-mac-node/node.env`. If the version file is missing (e.g. the upgrade was performed manually), the node side is skipped with a clear log message and the gateway rollback proceeds.
+- Pass `--skip-node` to roll back only the gateway (data + repo), leaving the npm package and node process alone.
 - The script asks for typed confirmation before destructive steps; pass `--yes` to skip.
 
 ## Backup file naming
