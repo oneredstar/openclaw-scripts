@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 
-# upgrade-openclaw.sh — back up data + repo, then pull the latest changes
-# and restart the Docker compose stack. Destructive only in the sense that
-# it restarts the running stack and overwrites the repo working tree; both
-# are backed up first.
+# upgrade-openclaw.sh — back up data + repo + node version, then pull the
+# latest changes and restart the Docker compose stack and the standalone
+# OpenClaw node. Destructive only in the sense that it restarts the
+# running stack/node and overwrites the repo working tree; everything is
+# backed up first so rollback can restore any of it.
 
 set -Eeuo pipefail
 trap 'fail "Command failed at line $LINENO: $BASH_COMMAND"' ERR
@@ -18,16 +19,10 @@ OPENCLAW_REPO_DIR="$HOME/openclaw"
 OPENCLAW_BACKUP_ROOT="$HOME/openclaw-backups"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 
-# Mac-side OpenClaw node (run via `openclaw node run`, configured by
-# ~/.openclaw-mac-node/node.env). The upgrade script stops the running
-# node, upgrades the npm package globally, and restarts the node.
-OPENCLAW_NODE_ENV_FILE="$HOME/.openclaw-mac-node/node.env"
-OPENCLAW_NODE_LOG="$HOME/.openclaw-mac-node/node.log"
-OPENCLAW_NODE_DISPLAY_NAME="MacNode"
-OPENCLAW_NODE_HOST="127.0.0.1"
-OPENCLAW_NODE_PORT="18789"
-
 YES=0
+
+# Resolve this script's directory so we can source the shared node helpers.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -54,14 +49,16 @@ usage() {
 Usage: $(basename "$0") [--yes]
 
 Upgrades the existing OpenClaw install by:
-  1. Backing up data and the active repo to timestamped names under
-     \$OPENCLAW_BACKUP_ROOT and verifying them.
+  1. Backing up data, the active repo, and the currently installed
+     openclaw npm package version (each gets a timestamped name under
+     \$OPENCLAW_BACKUP_ROOT and is verified before anything is touched).
   2. Stopping the current Docker compose stack (volumes preserved).
-  3. Pulling the latest changes (or, if detached, the latest stable tag).
-  4. Running the Docker setup and bringing the stack back up.
-  5. Stopping the running OpenClaw node (if any), upgrading the global
-     openclaw npm package, and restarting the node in the background
-     (skipped if ~/.openclaw-mac-node/node.env is missing).
+  3. Stopping the running OpenClaw node (if any).
+  4. Pulling the latest changes (or, if detached, the latest stable tag).
+  5. Running the Docker setup and bringing the stack back up.
+  6. Upgrading the global openclaw npm package (openclaw node).
+  7. Restarting the OpenClaw node in the background using
+     ~/.openclaw-mac-node/node.env (skipped if that file is missing).
 
 Options:
   -y, --yes    Skip the interactive confirmation prompt
@@ -109,6 +106,9 @@ confirm() {
     fi
 }
 
+# shellcheck source=lib/openclaw-node.sh
+source "$SCRIPT_DIR/lib/openclaw-node.sh"
+
 backup_existing_data() {
     if [ -d "$OPENCLAW_DATA_DIR" ]; then
         ensure_dir "$OPENCLAW_BACKUP_ROOT"
@@ -137,6 +137,50 @@ backup_existing_repo() {
     else
         fail "Expected OpenClaw repo at $OPENCLAW_REPO_DIR, but it was not found"
     fi
+}
+
+# Capture the currently installed openclaw npm package version BEFORE we
+# upgrade. The version is written to a sidecar file next to the data/repo
+# backups so that rollback-openclaw.sh can downgrade the package back to
+# what it was. Soft-fails (returns 0) when npm or openclaw isn't
+# installed yet (e.g. on a fresh install) — in that case the rollback
+# simply has nothing to downgrade.
+backup_existing_node_version() {
+    if ! command -v npm >/dev/null 2>&1; then
+        log "npm not found in PATH; skipping pre-upgrade node version capture."
+        return 0
+    fi
+    if ! command -v openclaw >/dev/null 2>&1; then
+        log "openclaw binary not found in PATH; nothing to capture."
+        return 0
+    fi
+    ensure_dir "$OPENCLAW_BACKUP_ROOT"
+    local version_file="$OPENCLAW_BACKUP_ROOT/openclaw-node-$TIMESTAMP.version"
+    if [ -e "$version_file" ]; then
+        fail "Refusing to overwrite existing node version file: $version_file"
+    fi
+    # `npm ls -g openclaw --depth=0` prints something like:
+    #   /path/to/global/lib
+    #   └── openclaw@1.2.3
+    # Pull the version token (the part after `@` on the matching line),
+    # after stripping any ANSI colour codes.
+    local current_version
+    current_version="$(
+        npm ls -g openclaw --depth=0 2>/dev/null \
+            | sed $'s/\x1b\[[0-9;]*m//g' \
+            | awk '/openclaw@/ {
+                sub(/.*openclaw@/, "")
+                sub(/[ \t)].*$/, "")
+                print
+                exit
+            }'
+    )"
+    if [ -z "$current_version" ]; then
+        log "Could not determine the currently installed openclaw npm version; node rollback will not be possible for the package."
+        return 0
+    fi
+    printf '%s\n' "$current_version" > "$version_file"
+    log "Saved pre-upgrade openclaw node version $current_version to $version_file"
 }
 
 stop_current_stack() {
@@ -194,33 +238,6 @@ start_updated_stack() {
     docker compose up -d
 }
 
-# Send SIGTERM to the running openclaw node (if any), wait briefly,
-# and escalate to SIGKILL only if the process is still alive. Matches
-# the `pkill -f "openclaw node"` pattern Nizam uses in his launch script.
-stop_openclaw_node() {
-    local pids
-    # `pgrep -f` matches against the full command line. "openclaw node"
-    # is the same pattern Nizam uses in his launch script.
-    pids="$(pgrep -f "openclaw node" || true)"
-    if [ -z "$pids" ]; then
-        log "No running openclaw node found"
-        return 0
-    fi
-    log "Stopping openclaw node (PIDs: $pids)"
-    # shellcheck disable=SC2086
-    kill $pids 2>/dev/null || true
-    sleep 1
-    if pgrep -f "openclaw node" >/dev/null 2>&1; then
-        log "openclaw node did not exit after SIGTERM; sending SIGKILL"
-        # shellcheck disable=SC2086
-        kill -9 $pids 2>/dev/null || true
-        sleep 1
-    fi
-    if pgrep -f "openclaw node" >/dev/null 2>&1; then
-        log "WARNING: openclaw node is still running; continuing anyway"
-    fi
-}
-
 upgrade_openclaw_node() {
     if ! command -v npm >/dev/null 2>&1; then
         log "npm not found in PATH; skipping the OpenClaw node npm upgrade."
@@ -241,55 +258,20 @@ upgrade_openclaw_node() {
     hash -r 2>/dev/null || true
 }
 
-start_openclaw_node() {
-    if [ ! -f "$OPENCLAW_NODE_ENV_FILE" ]; then
-        log "No node env file at $OPENCLAW_NODE_ENV_FILE; skipping node restart."
-        log "Re-run your node command manually when ready, e.g.:"
-        log "  pkill -f 'openclaw node' || true"
-        log "  source ~/.openclaw-mac-node/node.env"
-        log "  openclaw node run --host $OPENCLAW_NODE_HOST --port $OPENCLAW_NODE_PORT --display-name '$OPENCLAW_NODE_DISPLAY_NAME'"
-        return 0
-    fi
-    if ! command -v openclaw >/dev/null 2>&1; then
-        log "openclaw binary not found in PATH; cannot restart node."
-        log "Run 'npm install -g openclaw@latest' (or fix PATH) and re-run your node command manually."
-        return 0
-    fi
-
-    ensure_dir "$(dirname "$OPENCLAW_NODE_LOG")"
-    log "Starting openclaw node in the background (display-name=$OPENCLAW_NODE_DISPLAY_NAME, log=$OPENCLAW_NODE_LOG)"
-    # Source the env file inside a subshell so OPENCLAW_GATEWAY_TOKEN (and
-    # any other secrets) stay scoped to the launched process. The values
-    # are never echoed or written to the upgrade log.
-    (
-        set -a
-        # shellcheck disable=SC1090
-        . "$OPENCLAW_NODE_ENV_FILE"
-        set +a
-        nohup openclaw node run \
-            --host "$OPENCLAW_NODE_HOST" \
-            --port "$OPENCLAW_NODE_PORT" \
-            --display-name "$OPENCLAW_NODE_DISPLAY_NAME" \
-            >> "$OPENCLAW_NODE_LOG" 2>&1 &
-        disown
-    )
-    sleep 1
-    if pgrep -f "openclaw node" >/dev/null 2>&1; then
-        log "OpenClaw node is running; tail $OPENCLAW_NODE_LOG to confirm startup."
-    else
-        log "WARNING: openclaw node did not appear in pgrep after launch; check $OPENCLAW_NODE_LOG"
-    fi
-}
-
 print_rollback_notes() {
     local repo_backup_path="$OPENCLAW_BACKUP_ROOT/openclaw-repo-$TIMESTAMP"
     local data_backup_path="$OPENCLAW_BACKUP_ROOT/openclaw-data-$TIMESTAMP"
+    local node_version_file="$OPENCLAW_BACKUP_ROOT/openclaw-node-$TIMESTAMP.version"
 
     log "Upgrade complete"
-    log "Repo backup: $repo_backup_path"
+    log "Repo backup:        $repo_backup_path"
 
     if [ -d "$data_backup_path" ]; then
-        log "Data backup: $data_backup_path"
+        log "Data backup:        $data_backup_path"
+    fi
+
+    if [ -f "$node_version_file" ]; then
+        log "Node version file:  $node_version_file"
     fi
 
     log "To roll back, run:  $(basename "$0" | sed 's/upgrade/rollback/') --yes $TIMESTAMP"
@@ -320,8 +302,9 @@ main() {
     docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable"
 
     log "Upgrade will:"
-    log "  - back up data to   $OPENCLAW_BACKUP_ROOT/openclaw-data-$TIMESTAMP"
-    log "  - back up repo to   $OPENCLAW_BACKUP_ROOT/openclaw-repo-$TIMESTAMP"
+    log "  - back up data to        $OPENCLAW_BACKUP_ROOT/openclaw-data-$TIMESTAMP"
+    log "  - back up repo to        $OPENCLAW_BACKUP_ROOT/openclaw-repo-$TIMESTAMP"
+    log "  - capture the currently installed openclaw npm version"
     log "  - stop the compose stack (volumes preserved)"
     log "  - stop the running openclaw node (if any)"
     log "  - pull the latest repo changes and run the Docker setup"
@@ -331,6 +314,7 @@ main() {
 
     backup_existing_data
     backup_existing_repo
+    backup_existing_node_version
     stop_current_stack
     stop_openclaw_node
     update_repo

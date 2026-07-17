@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 
-# rollback-openclaw.sh — restore a previous repo (and optional data) backup.
-# Always backs up the current state to a pre-rollback-* name first, so the
-# rollback itself is reversible.
+# rollback-openclaw.sh — restore a previous repo (and optional data)
+# backup, and downgrade the npm-global openclaw package to the version
+# captured by upgrade-openclaw.sh before that upgrade. Always backs up
+# the current state to a pre-rollback-* name first, so the rollback is
+# itself reversible.
 
 set -Eeuo pipefail
 trap 'fail "Command failed at line $LINENO: $BASH_COMMAND"' ERR
@@ -19,6 +21,10 @@ TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 
 YES=0
 BACKUP_ID=""
+SKIP_NODE=0
+
+# Resolve this script's directory so we can source the shared node helpers.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -42,7 +48,7 @@ ensure_dir() {
 
 usage() {
     cat <<USAGE
-Usage: $(basename "$0") [--yes] [backup_id]
+Usage: $(basename "$0") [--yes] [--skip-node] [backup_id]
 
 Restores a previous OpenClaw repo backup. If backup_id is omitted, the
 most recent repo backup is selected.
@@ -54,9 +60,15 @@ The matching data backup (openclaw-data-<backup_id>) is restored if it
 exists; if no matching data backup is found, the current data directory
 is left in place.
 
+If the matching node version file (openclaw-node-<backup_id.version) is
+present, the global openclaw npm package is also downgraded to that
+version (unless --skip-node is given), and the OpenClaw node is
+restarted in the background using ~/.openclaw-mac-node/node.env.
+
 Options:
-  -y, --yes    Skip the interactive confirmation prompt
-  -h, --help   Show this help and exit
+  -y, --yes       Skip the interactive confirmation prompt
+      --skip-node Do not touch the OpenClaw node (npm package or process)
+  -h, --help      Show this help and exit
 USAGE
 }
 
@@ -99,6 +111,9 @@ confirm() {
         exit 1
     fi
 }
+
+# shellcheck source=lib/openclaw-node.sh
+source "$SCRIPT_DIR/lib/openclaw-node.sh"
 
 latest_repo_backup() {
     local latest_path
@@ -170,6 +185,7 @@ replace_with_backup() {
     local current="$1"
     local source="$2"
     local safenest
+
     safenest="${current}.pre-restore.$$.$(date +%s)"
 
     if [ -e "$current" ] || [ -L "$current" ]; then
@@ -198,7 +214,6 @@ restore_repo_backup() {
     local repo_backup_path="$OPENCLAW_BACKUP_ROOT/openclaw-repo-$backup_id"
 
     [ -d "$repo_backup_path" ] || fail "Repo backup not found: $repo_backup_path"
-    verify_backup "$repo_backup_path" "$repo_backup_path" >/dev/null 2>&1 || true
     [ -n "$(ls -A "$repo_backup_path" 2>/dev/null)" ] || fail "Repo backup is empty: $repo_backup_path"
 
     log "Restoring repo backup from $repo_backup_path (current state is in pre-rollback-*)"
@@ -216,6 +231,55 @@ restore_data_backup() {
 
     log "Restoring data backup from $data_backup_path (current state is in pre-rollback-data-*)"
     replace_with_backup "$OPENCLAW_DATA_DIR" "$data_backup_path"
+}
+
+# Downgrade the npm-global openclaw package to the version captured by
+# upgrade-openclaw.sh at backup_id. Reads openclaw-node-<backup_id>.version.
+# Soft-fails when the version file is missing or empty (e.g. the upgrade
+# was performed manually or the version could not be captured) so the
+# gateway rollback still proceeds.
+rollback_openclaw_node() {
+    if [ "$SKIP_NODE" = "1" ]; then
+        log "Skipping OpenClaw node rollback (--skip-node)"
+        return 0
+    fi
+
+    local backup_id="$1"
+    local version_file="$OPENCLAW_BACKUP_ROOT/openclaw-node-$backup_id.version"
+
+    if [ ! -f "$version_file" ]; then
+        log "No saved pre-upgrade node version at $version_file; cannot downgrade the npm-global openclaw package automatically."
+        log "If you know the previous version, run:  npm install -g openclaw@<version>"
+        return 0
+    fi
+
+    if ! command -v npm >/dev/null 2>&1; then
+        fail "npm not found in PATH; cannot downgrade the openclaw npm package. Restore $version_file manually."
+    fi
+
+    local previous_version
+    previous_version="$(tr -d '[:space:]' < "$version_file")"
+    if [ -z "$previous_version" ]; then
+        log "Version file $version_file is empty; cannot roll back the npm-global openclaw package."
+        return 0
+    fi
+
+    local npm_prefix
+    npm_prefix="$(npm config get prefix 2>/dev/null || echo "unknown")"
+    case "$npm_prefix" in
+        /usr/*)
+            log "npm global prefix is $npm_prefix (system location); sudo may be required for the downgrade."
+            ;;
+    esac
+
+    log "Rolling back openclaw npm package to $previous_version (from $version_file)"
+    if ! npm install -g "openclaw@$previous_version"; then
+        log "WARNING: 'npm install -g openclaw@$previous_version' failed; the openclaw node may not start cleanly."
+        log "Try manually:  npm install -g openclaw@$previous_version"
+        return 0
+    fi
+    hash -r 2>/dev/null || true
+    log "Downgraded openclaw npm package to $previous_version"
 }
 
 start_restored_stack() {
@@ -241,6 +305,9 @@ print_summary() {
     if [ -d "$OPENCLAW_BACKUP_ROOT/pre-rollback-data-$TIMESTAMP" ]; then
         log "Pre-rollback data:       $OPENCLAW_BACKUP_ROOT/pre-rollback-data-$TIMESTAMP"
     fi
+    if [ "$SKIP_NODE" = "0" ] && [ -f "$OPENCLAW_BACKUP_ROOT/openclaw-node-$backup_id.version" ]; then
+        log "Restored node version:   $(tr -d '[:space:]' < "$OPENCLAW_BACKUP_ROOT/openclaw-node-$backup_id.version")"
+    fi
     log "To undo this rollback, run:  $(basename "$0") --yes $TIMESTAMP"
 }
 
@@ -249,6 +316,10 @@ main() {
         case "$1" in
             -y|--yes)
                 YES=1
+                shift
+                ;;
+            --skip-node)
+                SKIP_NODE=1
                 shift
                 ;;
             -h|--help)
@@ -282,6 +353,16 @@ main() {
     else
         log "  data backup:   (no matching data backup; current data left in place)"
     fi
+    if [ "$SKIP_NODE" = "0" ]; then
+        if [ -f "$OPENCLAW_BACKUP_ROOT/openclaw-node-$BACKUP_ID.version" ]; then
+            local_version="$(tr -d '[:space:]' < "$OPENCLAW_BACKUP_ROOT/openclaw-node-$BACKUP_ID.version")"
+            log "  node version:  downgrade npm-global openclaw to $local_version"
+        else
+            log "  node version:  (no matching node version file; node rollback will be skipped)"
+        fi
+    else
+        log "  node version:  (--skip-node; node side untouched)"
+    fi
     log "Pre-rollback backups will be written as pre-rollback-*-$TIMESTAMP."
     confirm "Type 'rollback' to continue: " "rollback"
 
@@ -289,7 +370,14 @@ main() {
     stop_current_stack
     restore_repo_backup "$BACKUP_ID"
     restore_data_backup "$BACKUP_ID"
+    if [ "$SKIP_NODE" = "0" ]; then
+        stop_openclaw_node
+        rollback_openclaw_node "$BACKUP_ID"
+    fi
     start_restored_stack
+    if [ "$SKIP_NODE" = "0" ]; then
+        start_openclaw_node
+    fi
     print_summary "$BACKUP_ID"
 }
 
