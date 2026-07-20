@@ -207,7 +207,12 @@ update_repo() {
     cd "$OPENCLAW_REPO_DIR"
 
     log "Fetching latest changes"
-    git fetch origin --tags --prune
+    if git remote get-url origin >/dev/null 2>&1; then
+        git fetch origin --tags --prune
+    else
+        log "Remote 'origin' not found; fetching from all remotes"
+        git fetch --all --tags --prune
+    fi
 
     local current_branch
     current_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"

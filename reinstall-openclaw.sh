@@ -50,7 +50,7 @@ Usage: $(basename "$0") [--yes]
 Reinstalls OpenClaw by:
   1. Backing up \$OPENCLAW_DATA_DIR (and \$OPENCLAW_REPO_DIR if present) to
      \$OPENCLAW_BACKUP_ROOT with timestamped names and verifying them.
-    If present, \$OPENCLAW_NODE_DIR is also backed up and verified.
+         If present, \$OPENCLAW_NODE_DIR is also backed up and verified.
   2. Stopping any running OpenClaw Docker compose stack (without --volumes;
      named volumes are removed explicitly below).
   3. Removing leftover OpenClaw containers, images, networks, and volumes.
