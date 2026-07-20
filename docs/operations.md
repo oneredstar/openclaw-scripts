@@ -7,7 +7,7 @@ This repository contains a small set of macOS shell utilities for maintaining an
 ### 1. First-time or full reinstall
 
 - Use `reinstall-openclaw.sh` when the local installation needs to be replaced entirely.
-- The script backs up both the data directory and the local repo (with verification), then cleans up the OpenClaw Docker containers, images, networks, and volumes, removes the local clone and `~/.openclaw`, and clones the latest stable release before running the Docker setup.
+- The script backs up gateway data (`~/.openclaw-data`), standalone node data (`~/.openclaw-mac-node`), and the local repo (with verification), then cleans up the OpenClaw Docker containers, images, networks, and volumes, removes `~/.openclaw-mac-node`, `~/openclaw`, and `~/.openclaw-data`, and clones the latest stable release before running the Docker setup.
 - It requires an interactive login keychain unlock.
 - By default the script prints what it is about to do and asks for typed confirmation before any destructive step. Pass `--yes` to skip the prompt for automation.
 
@@ -23,7 +23,7 @@ This repository contains a small set of macOS shell utilities for maintaining an
 
 ### 3. Data reset
 
-- Use `reset-data.sh` when you only need a fresh `config`, `workspace`, and `auth-secrets` structure at `~/openclaw-data`.
+- Use `reset-data.sh` when you only need a fresh `config`, `workspace`, and `auth-secrets` structure at `~/.openclaw-data`.
 - The script backs up the existing data (and verifies it) before removing the source and recreating the standard subdirectories.
 - The script asks for typed confirmation before destructive steps; pass `--yes` to skip.
 

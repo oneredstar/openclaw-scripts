@@ -2,14 +2,14 @@
 
 Compact Mac shell utilities for installing, upgrading, resetting, backing up, and rolling back OpenClaw on local development machines.
 
-The scripts assume the OpenClaw repository lives at `~/openclaw` and that OpenClaw data lives at `~/openclaw-data`.
+The scripts assume the OpenClaw repository lives at `~/openclaw` and that OpenClaw gateway data lives at `~/.openclaw-data`.
 
 ## Available scripts
 
-- `backup-data.sh` — copies `~/openclaw-data` to a timestamped folder under `~/openclaw-backups`. **Non-destructive**: it never removes or modifies the source data directory. Safe to run as often as you want.
+- `backup-data.sh` — copies `~/.openclaw-data` to a timestamped folder under `~/openclaw-backups`. **Non-destructive**: it never removes or modifies the source data directory. Safe to run as often as you want.
 - `reset-data.sh` — backs up, then removes, the data directory and re-creates an empty `config`/`workspace`/`auth-secrets` structure. Destructive (requires interactive confirmation unless `--yes` is passed).
 - `upgrade-openclaw.sh` — backs up the active repo, data, and currently-installed npm `openclaw` version, pulls the latest changes (or the latest stable tag if detached), runs the Docker setup, restarts the stack, **and also upgrades the standalone OpenClaw node (`openclaw node run`) via `npm install -g openclaw@latest`**. The node is restarted in the background using `~/.openclaw-mac-node/node.env` for its environment; if that file is missing, only the gateway upgrade happens. The saved node version lets `rollback-openclaw.sh` downgrade the npm package back to what it was. Destructive (requires interactive confirmation unless `--yes` is passed).
-- `reinstall-openclaw.sh` — backs up data and repo, tears down OpenClaw Docker containers/images/networks/volumes, removes `~/openclaw` and `~/.openclaw`, then clones the latest stable release and runs the Docker setup. Destructive (requires interactive confirmation unless `--yes` is passed).
+- `reinstall-openclaw.sh` — backs up gateway data, standalone node data, and repo, tears down OpenClaw Docker containers/images/networks/volumes, removes `~/.openclaw-mac-node`, `~/openclaw`, and `~/.openclaw-data`, then clones the latest stable release and runs the Docker setup. Destructive (requires interactive confirmation unless `--yes` is passed).
 - `rollback-openclaw.sh` — restores a previous repo backup (and matching data backup if present), and also downgrades the npm-global `openclaw` package back to the version captured by `upgrade-openclaw.sh` before that upgrade. The OpenClaw node is then restarted in the background. Always snapshots the current state to a `pre-rollback-*` folder first, so a rollback is itself reversible. Pass `--skip-node` to leave the node side untouched. Destructive (requires interactive confirmation unless `--yes` is passed).
 
 Every script writes its backups under `~/openclaw-backups` with timestamped names and verifies the backup against the source before touching the source.

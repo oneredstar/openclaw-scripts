@@ -9,7 +9,7 @@
 set -Eeuo pipefail
 trap 'fail "Command failed at line $LINENO: $BASH_COMMAND"' ERR
 
-export OPENCLAW_DATA_DIR="$HOME/openclaw-data"
+export OPENCLAW_DATA_DIR="$HOME/.openclaw-data"
 export OPENCLAW_CONFIG_DIR="$OPENCLAW_DATA_DIR/config"
 export OPENCLAW_WORKSPACE_DIR="$OPENCLAW_DATA_DIR/workspace"
 export OPENCLAW_AUTH_PROFILE_SECRET_DIR="$OPENCLAW_DATA_DIR/auth-secrets"
@@ -207,14 +207,33 @@ update_repo() {
     cd "$OPENCLAW_REPO_DIR"
 
     log "Fetching latest changes"
-    git fetch --all --tags --prune
+    if git remote get-url origin >/dev/null 2>&1; then
+        git fetch origin --tags --prune
+    else
+        log "Remote 'origin' not found; fetching from all remotes"
+        git fetch --all --tags --prune
+    fi
 
     local current_branch
-    current_branch="$(git branch --show-current)"
+    current_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
 
     if [ -n "$current_branch" ]; then
-        log "Pulling latest changes for branch $current_branch"
-        git pull --ff-only
+        local upstream
+        upstream="$(git for-each-ref --format='%(upstream:short)' "refs/heads/$current_branch")"
+
+        if [ -n "$upstream" ]; then
+            log "Pulling latest changes for branch $current_branch from $upstream"
+            git pull --ff-only
+            return
+        fi
+
+        if git show-ref --verify --quiet "refs/remotes/origin/$current_branch"; then
+            log "Branch $current_branch has no upstream; fast-forwarding from origin/$current_branch"
+            git merge --ff-only "origin/$current_branch"
+            return
+        fi
+
+        fail "Branch $current_branch has no upstream and origin/$current_branch does not exist"
         return
     fi
 
@@ -226,7 +245,12 @@ update_repo() {
     fi
 
     log "Repository is detached; checking out latest stable release $latest_tag"
-    git switch --detach "$latest_tag"
+    if git switch --detach "$latest_tag" >/dev/null 2>&1; then
+        log "Checked out $latest_tag with git switch --detach"
+    else
+        git checkout --detach "$latest_tag"
+        log "Checked out $latest_tag with git checkout --detach"
+    fi
 }
 
 run_docker_setup() {

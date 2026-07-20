@@ -9,7 +9,7 @@
 set -Eeuo pipefail
 trap 'fail "Command failed at line $LINENO: $BASH_COMMAND"' ERR
 
-export OPENCLAW_DATA_DIR="$HOME/openclaw-data"
+export OPENCLAW_DATA_DIR="$HOME/.openclaw-data"
 export OPENCLAW_CONFIG_DIR="$OPENCLAW_DATA_DIR/config"
 export OPENCLAW_WORKSPACE_DIR="$OPENCLAW_DATA_DIR/workspace"
 export OPENCLAW_AUTH_PROFILE_SECRET_DIR="$OPENCLAW_DATA_DIR/auth-secrets"
