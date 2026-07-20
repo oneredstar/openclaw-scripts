@@ -2,9 +2,12 @@
 
 When editing this repo:
 
+- Never run the OpenClaw maintenance scripts as a test (`backup-data.sh`, `reset-data.sh`, `upgrade-openclaw.sh`, `rollback-openclaw.sh`, `reinstall-openclaw.sh`), because they can affect a live local OpenClaw install. Validate changes by static review and shell linting only.
 - Keep the scripts bash-first and reliably defensive: `set -Eeuo pipefail` should remain the default.
 - Prefer the existing helper patterns: `log`, `fail`, `require_command`, `ensure_dir`, `confirm`, `verify_backup`, and `replace_with_backup` (the latter only in `rollback-openclaw.sh`).
-- Do not change the default path constants unless every script that depends on them is updated together.
+- Keep default paths aligned across scripts: gateway data at `~/.openclaw-data`, standalone node at `~/.openclaw-mac-node`, and repo at `~/openclaw`.
+- In `reinstall-openclaw.sh`, back up both gateway data (`~/.openclaw-data`) and standalone node data (`~/.openclaw-mac-node`) before destructive cleanup.
+- In `reinstall-openclaw.sh`, destructive cleanup must remove `~/.openclaw-mac-node`, `~/openclaw`, and `~/.openclaw-data` for a true fresh install.
 - Keep destructive order safe: back up before removing data, repos, or volumes.
 - Every backup is verified against the source (top-level entry count) before the source is touched.
 - Backups are never overwritten: if the target backup path already exists, the script must fail rather than clobber it.

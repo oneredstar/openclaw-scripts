@@ -8,13 +8,14 @@
 set -Eeuo pipefail
 trap 'fail "Command failed at line $LINENO: $BASH_COMMAND"' ERR
 
-export OPENCLAW_DATA_DIR="$HOME/openclaw-data"
+export OPENCLAW_DATA_DIR="$HOME/.openclaw-data"
 export OPENCLAW_CONFIG_DIR="$OPENCLAW_DATA_DIR/config"
 export OPENCLAW_WORKSPACE_DIR="$OPENCLAW_DATA_DIR/workspace"
 export OPENCLAW_AUTH_PROFILE_SECRET_DIR="$OPENCLAW_DATA_DIR/auth-secrets"
 export OPENCLAW_HOME_VOLUME="openclaw_home"
 
 OPENCLAW_REPO_DIR="$HOME/openclaw"
+OPENCLAW_NODE_DIR="$HOME/.openclaw-mac-node"
 OPENCLAW_REPO_URL="https://github.com/openclaw/openclaw.git"
 OPENCLAW_BACKUP_ROOT="$HOME/openclaw-backups"
 OPENCLAW_TEST_DATA_DIR="$HOME/openclaw-test-data"
@@ -49,10 +50,11 @@ Usage: $(basename "$0") [--yes]
 Reinstalls OpenClaw by:
   1. Backing up \$OPENCLAW_DATA_DIR (and \$OPENCLAW_REPO_DIR if present) to
      \$OPENCLAW_BACKUP_ROOT with timestamped names and verifying them.
+    If present, \$OPENCLAW_NODE_DIR is also backed up and verified.
   2. Stopping any running OpenClaw Docker compose stack (without --volumes;
      named volumes are removed explicitly below).
   3. Removing leftover OpenClaw containers, images, networks, and volumes.
-  4. Removing the local clone and ~/.openclaw runtime data.
+    4. Removing the local clone, \$OPENCLAW_DATA_DIR, and \$OPENCLAW_NODE_DIR.
   5. Cloning the latest stable OpenClaw release and running the Docker setup.
 
 Options:
@@ -151,6 +153,21 @@ backup_existing_repo() {
     fi
 }
 
+backup_existing_node() {
+    if [ -d "$OPENCLAW_NODE_DIR" ]; then
+        ensure_dir "$OPENCLAW_BACKUP_ROOT"
+        local backup_path="$OPENCLAW_BACKUP_ROOT/openclaw-node-$TIMESTAMP"
+        if [ -e "$backup_path" ]; then
+            fail "Refusing to overwrite existing backup path: $backup_path"
+        fi
+        log "Backing up existing OpenClaw node data to $backup_path"
+        cp -a "$OPENCLAW_NODE_DIR" "$backup_path"
+        verify_backup "$OPENCLAW_NODE_DIR" "$backup_path"
+    else
+        log "No existing OpenClaw node data at $OPENCLAW_NODE_DIR; skipping node backup"
+    fi
+}
+
 cleanup_existing_installation() {
     local compose_image_ids=""
     local openclaw_image_ids=""
@@ -228,9 +245,14 @@ cleanup_existing_installation() {
         log "No OpenClaw Docker volumes found"
     fi
 
-    if [ -d "$HOME/.openclaw" ]; then
-        log "Removing $HOME/.openclaw"
-        rm -rf "$HOME/.openclaw"
+    if [ -d "$OPENCLAW_DATA_DIR" ]; then
+        log "Removing $OPENCLAW_DATA_DIR"
+        rm -rf "$OPENCLAW_DATA_DIR"
+    fi
+
+    if [ -d "$OPENCLAW_NODE_DIR" ]; then
+        log "Removing $OPENCLAW_NODE_DIR"
+        rm -rf "$OPENCLAW_NODE_DIR"
     fi
 
     if [ -d "$OPENCLAW_REPO_DIR" ]; then
@@ -261,7 +283,12 @@ clone_latest_stable_release() {
     fi
 
     log "Checking out latest stable release $latest_tag"
-    git switch --detach "$latest_tag"
+    if git switch --detach "$latest_tag" >/dev/null 2>&1; then
+        log "Checked out $latest_tag with git switch --detach"
+    else
+        git checkout --detach "$latest_tag"
+        log "Checked out $latest_tag with git checkout --detach"
+    fi
 }
 
 main() {
@@ -289,17 +316,21 @@ main() {
 
     log "Reinstall will:"
     log "  - back up data dir to   $OPENCLAW_BACKUP_ROOT/openclaw-data-$TIMESTAMP"
+    if [ -d "$OPENCLAW_NODE_DIR" ]; then
+        log "  - back up node dir to   $OPENCLAW_BACKUP_ROOT/openclaw-node-$TIMESTAMP"
+    fi
     if [ -d "$OPENCLAW_REPO_DIR" ]; then
         log "  - back up repo to      $OPENCLAW_BACKUP_ROOT/openclaw-repo-$TIMESTAMP"
     fi
     log "  - stop the compose stack (named volumes kept until explicit removal)"
     log "  - remove leftover openclaw containers, images, networks, volumes"
-    log "  - remove $OPENCLAW_REPO_DIR and $HOME/.openclaw"
+    log "  - remove $OPENCLAW_REPO_DIR, $OPENCLAW_DATA_DIR, and $OPENCLAW_NODE_DIR"
     log "  - clone the latest stable release and run the Docker setup"
     confirm "Type 'reinstall' to continue: " "reinstall"
 
     backup_existing_data
     backup_existing_repo
+    backup_existing_node
     cleanup_existing_installation
     clone_latest_stable_release
 
@@ -317,6 +348,9 @@ main() {
     log "Data backup:   $OPENCLAW_BACKUP_ROOT/openclaw-data-$TIMESTAMP"
     if [ -d "$OPENCLAW_BACKUP_ROOT/openclaw-repo-$TIMESTAMP" ]; then
         log "Repo backup:   $OPENCLAW_BACKUP_ROOT/openclaw-repo-$TIMESTAMP"
+    fi
+    if [ -d "$OPENCLAW_BACKUP_ROOT/openclaw-node-$TIMESTAMP" ]; then
+        log "Node backup:   $OPENCLAW_BACKUP_ROOT/openclaw-node-$TIMESTAMP"
     fi
 }
 

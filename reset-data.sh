@@ -6,7 +6,7 @@
 set -Eeuo pipefail
 trap 'fail "Command failed at line $LINENO: $BASH_COMMAND"' ERR
 
-export OPENCLAW_DATA_DIR="$HOME/openclaw-data"
+export OPENCLAW_DATA_DIR="$HOME/.openclaw-data"
 export OPENCLAW_CONFIG_DIR="$OPENCLAW_DATA_DIR/config"
 export OPENCLAW_WORKSPACE_DIR="$OPENCLAW_DATA_DIR/workspace"
 export OPENCLAW_AUTH_PROFILE_SECRET_DIR="$OPENCLAW_DATA_DIR/auth-secrets"
@@ -40,7 +40,7 @@ usage() {
     cat <<USAGE
 Usage: $(basename "$0") [--yes]
 
-Removes \$OPENCLAW_DATA_DIR (default: ~/openclaw-data) and re-creates the
+Removes \$OPENCLAW_DATA_DIR (default: ~/.openclaw-data) and re-creates the
 standard config/workspace/auth-secrets structure. A timestamped backup is
 written under \$OPENCLAW_BACKUP_ROOT first and verified before the source
 is removed.
