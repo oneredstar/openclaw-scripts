@@ -208,7 +208,7 @@ cleanup_existing_installation() {
     # "openclaw" elsewhere in the name.
     openclaw_image_ids="$({
         docker images --format '{{.Repository}} {{.ID}}' \
-            | awk '$1 ~ /^(.*\/)?openclaw($|[-/:])/ { print $2 }'
+            | awk '$1 ~ /^(.*\/)?openclaw($|[-\/:])/ { print $2 }'
         printf '%s\n' "$compose_image_ids"
     } | awk 'NF' | sort -u)"
 
